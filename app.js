@@ -27,7 +27,6 @@ const refresh2personData = {};
 const authHeader2personData = {};
 const id_token2personData = {};
 
-
 function now() {
   return Math.round(new Date().valueOf() / 1000);
 }
@@ -95,13 +94,23 @@ function validateAuthorizationHeader(header, res) {
 }
 
 function validateAccessTokenRequest(req, res) {
+  console.log("validateAccessTokenRequest", "starts")
   let success = true, msg;
-  if (req.body.grant_type !== "authorization_code" && req.body.grant_type !== "refresh_token") {
+  if (req.body.grant_type !== "authorization_code" && req.body.grant_type !== "refresh_token" && req.body.grant_type !== "password") {
     success = false;
-    msg = errorMsg("grant_type", "authorization_code or refresh_token", req.body.grant_type);
+    msg = errorMsg("grant_type", "authorization_code or refresh_token or password", req.body.grant_type);
   }
   if (req.body.grant_type === "refresh_token") {
     let personData = refresh2personData[req.body.refresh_token];
+    let refreshtoken = req.body.refresh_token;
+    console.log("validateAccessTokenRequest personData", personData);
+    console.log("validateAccessTokenRequest refreshToken", refreshtoken);
+    console.log("validateAccessTokenRequest refresh2", refresh2personData);
+
+    for(var key in refresh2personData) {
+        console.log("validateAccessTokenRequest key ", key, "value", refresh2personData[key]);
+     }
+    
     if (personData === undefined) {
       success = false;
       msg = "invalid refresh token";
@@ -114,16 +123,22 @@ function validateAccessTokenRequest(req, res) {
   //   success = false;
   //   msg = errorMsg("Authorization header", req.headers["authorization"], "Basic ZHVtbXktY2xpZW50LWlkOmR1bW15LWNsaWVudC1zZWNyZXQ=");
   // }
-  if (!validateClientId(req.body.client_id, res)) {
-    success = false;
-  }
-  if (req.body.client_secret !== EXPECTED_CLIENT_SECRET) {
-    success = false;
-    msg = errorMsg("client_secret", EXPECTED_CLIENT_SECRET, req.body.client_secret);
-  }
-  if (req.session.redirect_uri !== req.body.redirect_uri) {
-    success = false;
-    msg = errorMsg("redirect_uri", req.session.redirect_uri, req.body.redirect_uri);
+  // if (!validateClientId(req.body.client_id, res)) {
+  //   success = false;
+  // }
+  // if (req.body.client_secret !== EXPECTED_CLIENT_SECRET) {
+  //   success = false;
+  //   msg = errorMsg("client_secret", EXPECTED_CLIENT_SECRET, req.body.client_secret);
+  // }
+  // if (req.session.redirect_uri !== req.body.redirect_uri) {
+  //   success = false;
+  //   msg = errorMsg("redirect_uri", req.session.redirect_uri, req.body.redirect_uri);
+  // }
+  if (req.body.grant_type === "password") {
+    if (req.body.password !== "password") {
+      success = false;
+      msg = "invalid password";
+    }
   }
   if (!success) {
     const params = {};
@@ -132,10 +147,12 @@ function validateAccessTokenRequest(req, res) {
     }
     res.writeHead(401, params);
   }
+  console.log("validateAccessTokenRequest end")
   return success;
 }
 
 function createToken(name, email, expires_in, client_state) {
+  console.log("createToken starts")
   const code = "C-" + randomstring.generate(3);
   const accesstoken = "ACCT-" + randomstring.generate(6);
   const refreshtoken = "REFT-" + randomstring.generate(6);
@@ -148,17 +165,23 @@ function createToken(name, email, expires_in, client_state) {
     state: client_state,
     token_type: "Bearer"
   };
+
   id_token2personData[id_token] = authHeader2personData["Bearer " + accesstoken] = {
     email: email,
     email_verified: true,
     name: name
   };
   code2token[code] = token;
+  
+
   refresh2personData[refreshtoken] = {
     name: name,
     email: email,
     expires_in: expires_in
   };
+
+  console.log("createToken token", token)
+  console.log("createToken end")
   return code;
 }
 
@@ -187,28 +210,40 @@ function authRequestHandler(req, res) {
 app.get(AUTH_REQUEST_PATH, authRequestHandler);
 
 app.get("/login-as", (req, res) => {
+  let red = req.session.redirect_uri
+  console.log("login-as starts" + req)
   const code = createToken(req.query.name, req.query.email, req.query.expires_in, req.session.client_state);
-  if (req.session.redirect_uri) {
-    let redirectUri = req.session.redirect_uri;
-    let location = `${redirectUri}${redirectUri.includes('?') ? '&' : '?'}code=${code}`;
-    if (req.session.client_state) {
-      location += "&state=" + req.session.client_state;
-    }
-    res.writeHead(307, {"Location": location});
-    res.end();
-  }
+  console.log("code login-as " + code)
+  // if (req.session.redirect_uri) {
+  //   let redirectUri = req.session.redirect_uri;
+  //   let location = `${redirectUri}${redirectUri.includes('?') ? '&' : '?'}code=${code}`;
+  //   if (req.session.client_state) {
+  //     location += "&state=" + req.session.client_state;
+  //   }
+  //   console.log("location login-as " + location)
+  //   res.writeHead(307, {"Location": location});
+  //   res.end();
+  // }
+  const token = code2token[code];
+  res.send(token);
+  res.end(); 
+
 });
 
 app.post(ACCESS_TOKEN_REQUEST_PATH, (req, res) => {
+  console.log("ACCESS_TOKEN_REQUEST_PATH starts")
   if (validateAccessTokenRequest(req, res)) {
+    console.log("ACCESS_TOKEN_REQUEST_PATH validateded")
     let code = null;
     if (req.body.grant_type === "refresh_token") {
       const refresh = req.body.refresh_token;
       const personData = refresh2personData[refresh];
       code = createToken(personData.name, personData.email, personData.expires_in, null);
-      delete refresh2personData[refresh];
-    } else {
+      // delete refresh2personData[refresh];
+    } else if (req.body.grant_type === "authorization_code") {
       code = req.body.code;
+    } else if (req.body.grant_type === "password") {
+      code = createToken(req.body.username, req.body.password, 300, null);
     }
     const token = code2token[code];
     if (token !== undefined) {
@@ -216,6 +251,7 @@ app.post(ACCESS_TOKEN_REQUEST_PATH, (req, res) => {
       res.send(token);
     }
   }
+  console.log("ACCESS_TOKEN_REQUEST_PATH not validateded")
   res.end();
 });
 
@@ -225,12 +261,29 @@ app.get(USERINFO_REQUEST_URL, (req, res) => {
     console.log("userinfo response", token_info);
     res.send(token_info);
   } else {
-    res.status(404);
+    res.status(401);
+  }
+  res.end();
+});
+
+app.get("/revoke_access_token", (req, res) => {
+  const accesstoken = req.query.access_token
+  if (accesstoken !== undefined){
+    const token = authHeader2personData["Bearer " + accesstoken]
+    if (token !== undefined){
+      delete authHeader2personData["Bearer " + accesstoken]
+      res.status(200);
+    }else {
+      res.status(406);
+    }
+  }else {
+    res.status(400);
   }
   res.end();
 });
 
 app.get(TOKENINFO_REQUEST_URL, (req, res) => {
+  console.log("TOKENINFO_REQUEST_URL","starts")
   if (req.query.id_token == null) {
       res.status(400)
       res.send("missing id_token query parameter");

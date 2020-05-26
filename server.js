@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 8282;
 const app = require("./app");
 
 
-const server = app.app.listen(PORT);
+const server = app.app.listen(PORT, '0.0.0.0');
 
 console.log("Running on http://localhost:" + PORT);
 console.log("\texpected Client ID: " + app.EXPECTED_CLIENT_ID);
